@@ -1,0 +1,21 @@
+# Python 缓存
+__pycache__/
+*.pyc
+
+# macOS 系统垃圾文件
+.DS_Store
+
+# 虚拟环境（如果本地用 venv）
+venv/
+.venv/
+env/
+
+# 环境变量文件（包含密钥）
+.env
+
+# Streamlit 自动生成缓存/配置
+.streamlit/
+
+# Jupyter Checkpoints（如果用过 Notebook）
+.ipynb_checkpoints/
+
