@@ -94,7 +94,7 @@
 
 ## 💻 技术栈
 
-*   **语言**: Python 3.9+
+*   **语言**: Python 3.12+
 *   **核心框架**: LangChain, Streamlit
 *   **数据处理**: Pandas
 *   **LLM**: ZhipuAI (glm-4-air-250414)
