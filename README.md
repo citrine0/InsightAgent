@@ -1,12 +1,116 @@
-# InsightAgent: 一个具备“分层防御”与“自我进化”能力的AI数据分析师
 
-> 通过精巧的 Agent 架构，将不可靠的 LLM，转化为值得信赖的、能解决真实商业问题的“数据分析伙伴”。
+# InsightAgent: 从0到1构建可信赖的AI数据分析系统
 
-[![Python Version](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/downloads/)
+> **产品愿 ઉ景：** 让每一位业务人员都能拥有一个安全、可靠、无需代码的AI数据分析伙伴，将数据洞察的门槛降至为零。
+
+[![Product Status](https://img.shields.io/badge/Status-MVP%20Launched-brightgreen)](https://github.com/your-username/InsightAgent/)
+[![Python Version](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](https://github.com/your-username/InsightAgent/)
+[![Framework](https://img.shields.io/badge/Framework-LangChain%20%7C%20Streamlit-orange)](https://langchain.com/)
 
 ---
+
+## 1. 🎯 产品洞察：为什么AI在数据分析场景难以“一招鲜”？
+
+### 1.1 核心痛点：识别不同分析任务的独特挑战
+
+通过用户调研和技术预研，我发现数据分析场景并非铁板一块。不同的任务类型对AI Agent的能力要求截然不同，试图用一种通用架构解决所有问题是导致失败的主要原因。
+
+| 任务类型 | 核心挑战 (User & Technical Pain Point) |
+| :--- | :--- |
+| **📊 复杂数据操作 (Python/Pandas)** | 任务步骤多、逻辑链长、极易出错。需要AI具备**规划和纠错能力**。 |
+| **🔎 精确数据查询 (SQL)** | 语法严格、不容幻觉。需要AI**绝对遵循指令**，行为必须100%可预测。 |
+
+### 1.2 我的产品假设与系统设计
+
+**产品假设：** 我们不应该寻找一个“万能Agent”，而应该构建一个**“专家Agent团队”**。针对不同任务，设计并部署最适合该任务的Agent架构，才能实现整体系统的最高可靠性。
+
+**系统设计：** 基于此，我设计并编码实现了一个**异构双Agent系统**：
+1.  **Python Agent (分析师):** 采用**“计划-执行-校正”**架构，应对复杂、开放的分析任务。
+2.  **SQL Agent (查询员):** 采用**“强约束ReAct”**架构，应对精确、封闭的查询任务。
+
+## 2. 💡 解决方案：为不同挑战量身定制的Agent架构
+
+### 2.1 Python Agent: 应对“复杂性”的“三层防御”架构
+
+对于需要多步推理和数据操作的Python任务，我设计了一套容错性极高的架构。
+
+*   **产品价值：** 解决复杂任务的“黑盒”与“不可靠”问题，让分析路径透明且稳健。
+*   **架构实现：**
+    1.  **规划层 (Plan):** 将用户请求分解为线性的Pandas代码步骤。
+    2.  **执行与校正层 (Execute & Correct):** 逐一执行代码，并通过“AI自我修正”循环处理运行时错误。
+    3.  **认知层 (Knowledge):** 注入专业分析知识，使其能智能选择图表、拒绝不合理请求。
+
+---
+
+### 2.2 SQL Agent: 追求“确定性”的“强约束ReAct”架构
+
+对于“是”或“否”明确的SQL查询任务，可靠性是第一要务。为此，我没有使用通用ReAct，而是设计了一套带有“黄金法则”的强约束模板。
+
+*   **产品价值：** 解决AI在数据库查询中的“幻觉”问题，确保每一次查询都精准无误。
+*   **架构实现：**
+    *   **强制行为模式：** 通过精心设计的Prompt，我为SQL Agent设定了**不可违背的“黄金法则”**：`1. 必须先查表 -> 2. 必须先查Schema -> 3. 严禁使用未见过的表/列名`。
+    *   **结果：** 这种强约束极大地压缩了LLM“自由发挥”的空间，使其行为变得高度可预测。
+
+## 3. 📈 数据驱动的迭代与验证：黄金测试集
+
+为了科学地验证我的架构选择，我创建了一个包含SQL和Python两类共15个用例的“黄金测试集”，并记录了详细的迭代过程。
+
+### 3.1 Python Agent 的进化之路
+
+| 迭代版本 | 核心架构 | 成功率 (Python Test Cases) | 关键洞察 |
+| :--- | :--- | :---: | :--- |
+| **V1.0** | 基线：单步 ReAct | **66.7%** (10/15) | **证明了通用框架的局限性**：在多步推理时极易失败。 |
+| **V2.0** | **“三层防御”架构** | **87.0%** (13/15) | **验证了架构的优越性**：结构化流程能有效管理AI的不确定性。|
+
+### 3.2 SQL Agent 的极致可靠性
+
+| 迭代版本 | 核心架构 | 成功率 (SQL Test Cases) | 关键洞察 |
+| :--- | :--- | :---: | :--- |
+| **V1.0** | 基线：通用 ReAct | 80% (常因表/列名幻觉失败) | **发现了“过度自由”的问题**：通用ReAct给了LLM太多犯错空间。 |
+| **V2.0** | **“强约束ReAct”架构** | **100%** | **证明了“约束即能力”**：在精确任务中，通过Prompt工程限制AI是提升可靠性的最佳途径。|
+
+<details>
+<summary><strong>点击查看：完整的黄金测试集评测记录</strong></summary>
+
+| 任务类型 | 用户问题 | V1.0 结果 | V2.0 结果 | 备注 |
+| :--- | :--- | :---: | :---: | :--- |
+| Python | "用条形图展示每个地区的总销售额" | ✅ 成功 | ✅ 成功 | |
+| Python | "创建一个新列叫‘订单等级’..." | ❌ 失败 | ✅ 成功 | V1.0无法处理多步依赖任务 |
+| SQL | "哪个地区的销售额最高？" | ❌ 失败 | ✅ 成功 | V1.0幻觉了列名 `sales_amount` |
+| SQL | "订单ID为10010的总金额是多少？" | ✅ 成功 | ✅ 成功 | |
+| ... | ... | ... | ... | |
+
+*(这里可以放入您更详细的表格)*
+
+</details>
+
+## 4. 🚀 成果与未来规划
+
+### 4.1 最终产品演示 (Live Demo)
+
+*(在这里嵌入您最终的、高质量的GIF，最好能展示Python和SQL两种任务的切换)*
+
+![Live Demo of InsightAgent](https://user-images.githubusercontent.com/your-image-path/demo.gif)
+
+### 4.2 产品路线图 (Roadmap)
+
+*   **下一步 (Next Step):** **智能Agent路由 (Agent Router)** - 开发一个“调度员Agent”，能自动分析用户问题，并将其分发给最合适的专家Agent（Python或SQL），实现无缝的用户体验。
+*   **中期 (Mid-Term):** **多Agent协作 (Multi-Agent Collaboration)** - 让Python Agent能够“调用”SQL Agent来获取数据，实现更复杂的分析工作流，例如“先用SQL从数据库取数，再用Python进行可视化分析”。
+*   **长期 (Long-Term):** **Agent平台化** - 构建低代码的AI Tools自定义模块，让运营人员可以“组装”自己的专家Agent，应对更多元的业务场景。
+
+## 5. 🧠 我的核心思考
+
+> 1.  **没有银弹，只有适配 (No Silver Bullet, Only Fit):** 最好的Agent架构不存在，只存在最适合特定任务的架构。产品经理的核心是洞察任务本质，并做出正确的技术选型。
+> 2.  **约束即能力 (Constraint as a Capability):** 在追求AI智能的同时，我们必须学会设计“缰绳”。对于需要高确定性的任务，精巧的约束比无尽的“自由”更强大。
+> 3.  **系统大于个体 (System over Individual):** 构建一个由多个“70分”的专家Agent组成的、协同工作的系统，其价值远大于试图打造一个“90分”的通用全能Agent。
+
+---
+
+## 🛠️ 如何本地运行
+
+*(保持不变)*
+...
 
 ## 🚀 项目速览 (Live Demo)
 
