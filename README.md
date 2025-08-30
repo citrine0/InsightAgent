@@ -1,7 +1,7 @@
 
 # InsightAgent: 从0到1构建可信赖的AI数据分析系统
 
-> **产品愿 ઉ景：** 让每一位业务人员都能拥有一个安全、可靠、无需代码的AI数据分析伙伴，将数据洞察的门槛降至为零。
+> **产品愿景：** 让每一位业务人员都能拥有一个安全、可靠、无需代码的AI数据分析伙伴，将数据洞察的门槛降至为零。
 
 [![Product Status](https://img.shields.io/badge/Status-MVP%20Launched-brightgreen)](https://github.com/your-username/InsightAgent/)
 [![Python Version](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -123,7 +123,6 @@ AI工具的出现看似解决了问题，但却引入了一个更深的“信任
 | Python | 陷阱 ｜ 不存在的列 ｜ "请分析顾客年龄与消费金额的关系。" | ✅ 成功 | ✅ 成功 | |
 | Python | 陷阱 ｜ 不合理请求 ｜ "请用饼图展示每个订单ID的销售额。" | ❌ 失败 | ✅ 成功 | 无法识别不合理问题 |
 | Python | 陷阱 ｜ 隐性类型转换 ｜ "统计每个季度的销售额。" | ✅ 成功 | ✅ 成功 | |
-
 | :--- | :--- | :---: | :---: | :--- |
 | SQL | 简单 ｜ 基础查询 ｜ "华南地区有多少条订单记录？ " | ✅ 成功 | ✅ 成功 | |
 | SQL | 简单 ｜ 基础查询 ｜ "列出所有属于“电子产品”类别的订单。" | ✅ 成功 | ✅ 成功 | |
