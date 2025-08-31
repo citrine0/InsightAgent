@@ -176,11 +176,8 @@ AI工具的出现看似解决了问题，但却引入了一个更深的“信任
 
 ## 4. 🚀 成果与未来规划
 
-### 4.1 最终产品演示 (Live Demo)
+### 4.1 最终产品演示
 
-*(在这里嵌入您最终的、高质量的GIF，最好能展示Python和SQL两种任务的切换)*
-
-![Live Demo of InsightAgent](https://user-images.githubusercontent.com/your-image-path/demo.gif)
 
 ### 4.2 产品路线图：从“专家团队”到“智能大脑”
 
