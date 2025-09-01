@@ -177,7 +177,7 @@ AI工具的出现看似解决了问题，但却引入了一个更深的“信任
 ## 4. 🚀 成果与未来规划
 
 ### 4.1 最终产品演示
-
+![Watch the video](https://github.com/user-attachments/assets/02da236e-7c64-40f7-b9c7-cd17e7a2dd7c) 
 
 ### 4.2 产品路线图：从“专家团队”到“智能大脑”
 
