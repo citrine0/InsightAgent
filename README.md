@@ -122,7 +122,7 @@ AI工具的出现看似解决了问题，但却引入了一个更深的“信任
 
 | **1. 初始蓝图** | **2. “自我修正”关键时刻** | **3. 可靠的结果交付** |
 | :---: | :---: | :---: |
-| ![初始功能布局原型](assets/images/Wireframe - 1.png) | ![自我修正过程的可视化](assets/images/Wireframe - 2.png) | ![清晰的结果交付](assets/images/Wireframe - 3.png) |
+| ![初始功能布局原型](assets/image/Wireframe - 1.png) | ![自我修正过程的可视化](assets/image/Wireframe - 2.png) | ![清晰的结果交付](assets/image/Wireframe - 3.png) |
 | **设计理念：明确范围**| **设计理念：建立信任** | **设计理念：价值闭环** |
 
 ## 3. 📈 数据驱动的迭代与验证：追求极致的可靠性
