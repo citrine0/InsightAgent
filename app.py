@@ -6,11 +6,13 @@ from io import StringIO
 import sqlite3
 from datetime import datetime, timedelta
 import random
+import ast
+from contextlib import redirect_stdout
 from dotenv import load_dotenv
 
 from langchain_community.chat_models import ChatZhipuAI
 from langchain_community.utilities import SQLDatabase
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from langchain_experimental.tools.python.tool import PythonAstREPLTool
 from langchain.prompts import ChatPromptTemplate, PromptTemplate
 from langchain.agents import AgentExecutor, create_tool_calling_agent, create_openai_tools_agent
@@ -103,75 +105,233 @@ class PythonCodeInput(BaseModel):
 @st.cache_resource
 def create_agent_from_df(df: pd.DataFrame):
     """
-    【最终电路测试版】
-    放弃所有 Agent 和工具，只测试最核心的 LLM 代码生成能力。
+    【最终架构 V3.0: 计划-执行 + AI自校正 + 注入专业知识】
+
+    该架构将Agent的工作流分解为两个核心阶段：
+    1.  计划 (Planning): LLM首先将用户的复杂请求分解为一个简单的、线性的Python代码步骤列表。
+    2.  执行 (Execution): Agent会逐一执行这些简单的步骤，并在每一步都启用一个带3次重试机会的“自我纠正”循环。
+
+    同时，Prompt中注入了“资深分析师”的专业知识，使其能拒绝不合理请求并选择最佳可视化方案。
     """
+
     # 1. 定义一个最简单的 Python REPL 环境
-    repl = PythonAstREPLTool(locals={"df": df, "plt": plt, "pd": pd})
+    # 我们需要将df的info信息传入，用于后续的schema参考
+    buffer = StringIO()
+    df.info(buf=buffer)
+    df_schema = buffer.getvalue()
 
-    # 2. 创建一个极其简单的 Prompt，只要求生成代码
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system",
-             """
-            你是一个 Python 代码生成器。根据用户问题，生成一段完整的、单行的、可以用分号分隔的 Python 代码，来对一个名为 `df` 的 DataFrame 进行操作。
-
-            你的所有分析和代码【必须】只使用`df`中实际存在的列。在回答前，你必须在内心确认用户提到的列是否存在于`df`的结构中（参考下方提供的`df_schema`）。
-            如果用户提到的关键列不存在，你【必须】生成一段返回Markdown字符串的Python代码，代码内容应明确告知用户数据缺失。在任何情况下，【绝对禁止】创造、猜测或假设任何不存在的数据。违反此规则将被视为重大失败。
-
-            - 如果是数据查询，代码的最后一个表达式必须返回一个 Markdown 字符串。
-            - 如果是绘图，代码应包含所有绘图指令。具体要求：
-              - 代码开头必须包含 `plt.rcParams["font.sans-serif"] = ["Microsoft YaHei"]`。
-              - 必须包含标题和坐标轴标签，如 `plt.title(...)`。
-              - 为了美观，可以适当调整图形大小 `plt.figure(figsize=(10, 6))`。
-              - 代码最后不需要有任何返回值。
-            - 禁止包含任何 import 语句或重新定义 df。
-            你的输出【必须】只有代码本身，不能有任何其他文字或解释。
-             """),
-            ("user",
-             """
-            # `df` 的结构:
-            {df_schema}
-            ---
-            # 用户问题:
-            {input}
-            """),
-        ]
+    repl = PythonAstREPLTool(
+        locals={"df": df, "plt": plt, "pd": pd},
+        description="一个用于执行Python代码的REPL环境"
     )
 
-    # 3. 构建最简单的调用链: prompt -> llm -> string_output
-    chain = prompt | llm | StrOutputParser()
+    # 2. 【关键】为两个阶段设计不同的、高度优化的Prompt
 
-    # 4. 创建一个简单的执行器类
-    class FinalExecutor:
-        def __init__(self, llm_chain, repl_tool):
-            self.llm_chain = llm_chain
-            self.repl_tool = repl_tool
+    # 2.1 规划阶段 (Planning Stage) Prompt
+    PLANNING_PROMPT_TEMPLATE = """
+你是一个极其严谨、注重格式、且100%忠于事实的数据分析**计划员**。你的唯一任务是，将用户的请求，转化为一个**100%正确、健壮、且单行的Python列表字符串**。
 
-        def invoke(self, input_dict: dict):
+# 数据结构:
+你唯一可以操作的数据是 `df`，其结构如下:
+```{df_schema}```
+
+# --- 【！！！最高优先级安全铁律 (必须首先遵守)！！！】 ---
+1.  **【事实核查铁律】**: 在生成任何计划**之前**，你【必须】检查用户请求中提到的【所有关键名词（特别是列名）】是否存在于上方的`df_schema`中。
+    *   如果**有任何一个关键实体不存在**（如，一个不存在的列名‘重量’，或一个不存在的支付方式‘现金’），你的唯一输出【必须】是：`["print('抱歉，分析无法继续，因为您的请求中包含数据中不存在的信息。')"]`
+    *   **【绝对禁止】**在事实核-查失败后，尝试生成任何其他代码或进行“猜测性”的修复。
+
+# --- 【！！！核心输出格式铁律！！！】 ---
+2.  **【格式铁律】**: 你的输出**【必须】**是一个**合法的、单行的Python列表的字符串形式**。**【严禁】**包含任何换行符或额外文字。
+3.  **【引号铁律】**: 列表元素**必须**用**双引号 `"`** 包裹。元素**内部**代码，**必须**用**单引号 `'`**。
+4.  **【字体铁律】**: 如果需要**绘图**，计划的**第一步**，**必须**是 `'plt.rcParams["font.sans-serif"] = ["Microsoft YaHei"]'`。
+5.  **【终结者铁律】**: 计划的**【最后一步】**，**必须**是一个**直接求值**的【Python表达式】，或一个**绘图动作**。
+
+---
+# --- 【用于“启发”而非“作弊”的参考案例】 ---
+# 你需要从这些【通用】案例中，学习解决问题的【模式】和输出的【精确格式】。
+
+# 【案例1：一个基础的聚合查询】
+# 用户请求: "找出销售额最高的那笔订单ID是什么？"
+# 你的输出: `["df.loc[df['total_amount'].idxmax(), 'order_id']"]`
+
+# 【案例2：一个基础的绘图请求】
+# 用户请求: "用条形图展示不同支付方式的使用次数"
+# 你的输出: `["plt.rcParams['font-sans-serif'] = ['Microsoft YaHei']", "payment_counts = df['payment_method'].value_counts()", "payment_counts.plot(kind='bar', title='各支付方式使用次数')"]`
+
+# 【案例3：一个需要逻辑推理的分析】
+# 用户请求: "找出哪些客户只使用过一种支付方式"
+# 你的输出: `["df.groupby('customer_id')['payment_method'].nunique().reset_index(name='unique_payment_count').query('unique_payment_count == 1')"]`
+# ----------------------------------------------------
+
+    # 用户真实请求:
+    {user_question}
+
+    # 你的计划列表:
+    """
+    planning_prompt = PromptTemplate.from_template(PLANNING_PROMPT_TEMPLATE)
+
+    # 2.2 单步代码纠正 (Step Correction) Prompt
+    CORRECTION_PROMPT_TEMPLATE = """
+    你是一个顶级的Python代码调试专家。你之前的同事在执行一个分析计划的某个步骤时失败了。
+    你的唯一任务是，分析**失败的代码**和**具体的错误信息**，然后生成一行**【修正后】**的、全新的Python代码来完成这个步骤。
+
+    # 分析计划的上下文:
+    - 原始用户请求: {user_question}
+    - 完整的分析计划: {plan}
+    - 当前失败的步骤: `{failed_step_code}`
+    - 执行时遇到的错误: `{error_message}`
+
+    # 你的输出规则:
+    1.  你的输出**【必须】**只有一行修正后的Python代码。
+    2.  **【严禁】**包含任何解释、道歉或额外的文字。
+    3.  修正后的代码必须与原步骤的目标保持一致。
+
+    # 修正后的单行Python代码:
+    """
+    correction_prompt = PromptTemplate.from_template(CORRECTION_PROMPT_TEMPLATE)
+
+    # 2.3 【新】最终答案生成 (Final Answer Generation) Prompt
+    # 这个Prompt用于将最终的变量结果，转化为人类可读的答案。
+    FINAL_ANSWER_PROMPT_TEMPLATE = """
+    你是一个极其聪明且善于沟通的数据分析助手。你的工程师同事已经成功执行了一个分析计划，并为你提供了计划的【最后一步代码】和该步骤【执行后的原始结果】。
+
+    你的任务是，像一个真正的分析师一样，**解读**这些原始结果，并为最终用户，生成一个**简洁、清晰、且人类友好的最终答案**。
+
+    # 分析的上下文:
+    - 原始用户请求: {user_question}
+    - 分析计划的最后一步代码: `{last_step_code}`
+    - 【关键】最后一步的执行结果 (可能是原始的、丑陋的字符串形式): 
+    ```
+    {last_step_result}
+    ```
+
+    # 你的【决策与输出】规则:
+    
+    【第一优先级：特殊信号识别】:检查【最后一步代码】是否是print(...)语句，并且其【执行结果】(last_step_result)中是否包含了“抱歉”、“无法”、“不适合”等**“最终结论”**式的关键词。 如果同时满足这两个条件，这说明你的同事（Planner Agent）已经替你完成了所有工作。 在这种情况下，你的唯一任务，就是**【直接、原封不动地，只输出那个【执行结果】的字符串，绝对禁止添加任何额外的包装或解释文字。】** 
+
+    1.  **【首要规则：判断是否为绘图】** 检查【最后一步代码】中是否包含 `.plot` 或 `plt.`。如果是，忽略【执行结果】，你的唯一答案【必须】是："图表已成功生成，请在下方查看。"
+
+    2.  **【次要规则：判断是否为表格型数据】** 观察【执行结果】的字符串形式。如果它看起来像一个Pandas DataFrame或Series的打印输出（包含列名、索引、和多行数据），你【必须】**尽最大努力**，将其**重新解析并格式化**为一个**美观的、对齐的Markdown表格**。**【严禁】**直接返回那个丑陋的原始字符串。
+
+    3.  **【次要规则：判断是否为单一值】** 如果【执行结果】是一个简单的、单一的值（如一个产品名称 `'笔记本电脑 Max'`，一个数字 `12345.67`，或一个简单的列表 `['A', 'B']`），请用一句**完整的、自然的句子**来总结这个答案。例如：“根据分析，单价最高的产品是‘笔记本电脑 Max’。”
+
+    4.  **【兜底规则：处理空结果或无法识别的结果】** 如果【执行结果】是 `None`、空字符串、或任何你无法理解的格式，请根据【原始用户请求】，给出一个礼貌的、说明情况的回答。例如：“操作已成功执行，但没有产生可供展示的输出结果。”或“根据您的请求，没有找到符合条件的数据。”
+
+    # 你的最终答案 (请严格遵守以上决策流程):
+    """
+    final_answer_prompt = PromptTemplate.from_template(FINAL_ANSWER_PROMPT_TEMPLATE)
+
+    # 3. 构建LangChain调用链
+    # 使用 .with_types(input_schema=...) 可以为链的输入提供更好的类型提示和验证
+    planning_chain = planning_prompt | llm | StrOutputParser()
+    correction_chain = correction_prompt | llm | StrOutputParser()
+    final_answer_chain = final_answer_prompt | llm | StrOutputParser()
+
+    # 4. 创建最终的、带“计划-执行”循环的执行器类
+    class PlanAndExecuteExecutor:
+        def __init__(self, planning_chain, correction_chain, final_answer_chain, repl_tool):
+            self.planning_chain = planning_chain
+            self.correction_chain = correction_chain
+            self.final_answer_chain = final_answer_chain
+            self.repl = repl_tool
+
+        def invoke(self, user_question: str):
+
+            # --- 【最终修复】步骤 0: 创建一个“一次性的沙盒” ---
+            sandbox_repl = PythonAstREPLTool(
+                locals={"df": df.copy(), "plt": plt, "pd": pd}
+            )
+
+            # --- 阶段一: 计划 ---
+            progress_placeholder = st.empty()
+            progress_placeholder.info("🤔 正在为您的问题制定分析计划...")
+
+            plan_str_raw = self.planning_chain.invoke({
+                "user_question": user_question,
+                "df_schema": df_schema
+            })
+
+            print(f"--- [DEBUG] LLM返回的原始计划字符串: '{plan_str_raw}'")
             try:
-                # 第一步：调用 LLM 生成代码字符串
-                print("--- [DEBUG] 正在调用 LLM 生成代码...")
-                code_to_run = self.llm_chain.invoke(input_dict)
-                print(f"--- [DEBUG] LLM 生成的代码: {code_to_run}")
-
-                # 第二步：执行代码并返回结果
-                print("--- [DEBUG] 正在执行生成的代码...")
-                result = self.repl_tool.run(code_to_run)
-                print(f"--- [DEBUG] 代码执行结果: {str(result)[:200]}...")
-
-                # 检查是否是绘图任务
-                if plt.get_fignums():
-                    # 如果是绘图，即使代码有返回值，我们也统一返回成功消息
-                    return {"output": "图表已成功生成，请查看。"}
+                plan_str_cleaned = plan_str_raw.replace('\n', '').replace('\r', '')
+                start = plan_str_cleaned.find('[')
+                end = plan_str_cleaned.rfind(']')
+                if start != -1 and end != -1:
+                    plan_str_formatted = plan_str_cleaned[start:end + 1]
                 else:
-                    # 否则返回代码的执行结果
-                    return {"output": result}
+                    plan_str_formatted = plan_str_cleaned
 
+                plan = ast.literal_eval(plan_str_formatted)
+                if not isinstance(plan, list):
+                    raise ValueError("LLM did not return a list.")
             except Exception as e:
-                return {"output": f"执行时出现严重错误: {e}"}
+                return {"output": f"抱歉，我无法为您的问题制定一个有效的分析计划。原始输出: '{plan_str_raw}', 错误: {e}"}
 
-    return FinalExecutor(chain, repl)
+            progress_placeholder.info(f"✅ 计划已制定，共 {len(plan)} 个步骤。正在开始执行...")
+
+            # --- 阶段二: 分步执行与即时纠正 ---
+            last_step_result = None
+            for i, step_code in enumerate(plan):
+                current_attempts = 0
+                max_attempts_per_step = 3
+                step_succeeded = False
+                code_to_run = step_code
+                error_message = ""
+
+                while current_attempts < max_attempts_per_step and not step_succeeded:
+                    current_attempts += 1
+
+                    if current_attempts > 1:
+                        progress_placeholder.info(f"⏳ 第 {current_attempts} 次尝试执行步骤 {i + 1}...")
+                    else:
+                        progress_placeholder.info(f"⏳ 正在执行步骤 {i + 1}/{len(plan)}: `{code_to_run}`")
+
+                    try:
+                        execution_result = sandbox_repl.run(code_to_run)
+
+                        if isinstance(execution_result, str) and any(
+                                kw in execution_result.lower() for kw in ["error", "exception"]):
+                            raise RuntimeError(execution_result)
+                        step_succeeded = True
+                        last_step_result = execution_result  # 永远记录最后一步的结果
+                        progress_placeholder.success(f"✅ 步骤 {i + 1} 成功！")
+
+                    except Exception as e:
+                        error_message = str(e)
+                        progress_placeholder.warning(
+                            f"⚠️ 步骤 {i + 1} 在第 {current_attempts} 次尝试时遇到错误: {error_message[:200]}...")
+
+                        if current_attempts < max_attempts_per_step:
+                            progress_placeholder.info("🤖 正在尝试自我修正...")
+                            code_to_run = self.correction_chain.invoke({
+                                "user_question": user_question,
+                                "plan": plan,
+                                "failed_step_code": code_to_run,
+                                "error_message": error_message
+                            })
+
+                if not step_succeeded:
+                    final_error_message = f"关键步骤 `{step_code}` 在尝试 {max_attempts_per_step} 次后仍然失败。最后一次的错误是: {error_message}"
+                    progress_placeholder.error(final_error_message)
+                    return {"output": f"抱歉，分析未能完成。\n\n**失败详情:**\n{final_error_message}"}
+
+            # --- 阶段三: 智能提取与生成最终答案 ---
+            progress_placeholder.info("✅ 所有步骤执行完毕！正在为您提取并总结最终答案...")
+
+            if plt.get_fignums():
+                progress_placeholder.success("图表已生成！")
+                return {"output": "图表已成功生成，请在下方查看。"}
+
+            final_answer = self.final_answer_chain.invoke({
+                "user_question": user_question,
+                "last_step_code": plan[-1] if plan else "N/A",
+                "last_step_result": str(last_step_result)  # 因为铁律，这个结果现在是可靠的
+            })
+            progress_placeholder.success("分析完成！")
+            return {"output": final_answer}
+
+    # 返回这个执行器的实例
+    return PlanAndExecuteExecutor(planning_chain, correction_chain, final_answer_chain, repl)
 
 
 @st.cache_resource
@@ -193,8 +353,26 @@ def create_agent_from_db(db_path: str):
         **你有以下工具可以使用:**
         {tools}
 
-        **为了使用工具，你必须在JSON中指定一个行动。**
-        有效的 "action" 值必须是以下之一: {tool_names}
+        **为了使用工具，你必须、也只能使用下面这种严格的格式:**
+
+    ```
+    Thought: 思考过程...
+    Action:
+    ```json
+    {{
+      "action": "唯一的工具名",
+      "action_input": "工具的输入"
+    }}
+    ```
+
+    **【！！！绝对禁止！！！】**
+    1.  在 `Thought:` 和 `Action:` 的JSON块之间，添加任何额外的文字、解释、代码或注释。
+    2.  在最终的JSON块之外，输出任何SQL代码。
+    3.  自己创造Action的JSON格式。
+
+    **你的回应【必须】以 `Thought:` 开始，并以包含`Action`的JSON代码块结束。中间不允许有任何其他内容。**
+
+    有效的 "action" 值必须是以下之一: {tool_names}
 
         **数据库交互黄金法则 (必须严格遵守):**
     1.  **先探索，后行动**: 在回答任何关于数据的问题前，你的第一步【必须】是使用 `sql_db_list_tables` 查看所有表。第二步【必须】是使用 `sql_db_schema` 查看你认为相关的表的结构。
@@ -236,9 +414,22 @@ def create_agent_from_db(db_path: str):
     Final Answer: 根据工具查询到的数据显示，销售额最高的地区是华东。 
 
     ---
-     **最终答案生成指南 (必须遵守):**
-    *   当工具的查询结果是一个列表（例如，包含多行数据）时，你的 `Final Answer` **必须** 将列表中的**每一项**都清晰、完整地列出来。
-    *   **严禁**对多行结果进行任何形式的总结、截断或只选择其中一部分作为示例。你必须展示全部数据。
+       **最终答案生成指南 (V3 - 强制Final Answer):**
+*   当你已经从`sql_db_query`工具的`Observation`中获得了解决用户问题所需的所有信息后，你的下一步【必须】是生成最终答案。
+*   **你的最终答案【必须】以 `Final Answer:` 这个词开头。**
+*   如果查询结果是多行数据，你【必须】在`Final Answer:`之后，将其格式化为一个带表头的Markdown表格。
+*   **【严禁】** 在没有获得最终数据之前，提前使用`Final Answer:`。
+*   **【严禁】** 在`Thought:`之后，直接输出Markdown表格或其他非`Action`格式的内容。
+
+    **最终答案正确范例:**
+    ```
+    Thought: 我已经获取了所有需要的数据，现在可以生成最终的Markdown表格答案了。
+    Final Answer: 根据工具查询到的数据显示，...
+
+    | order_id | ... |
+    |----------|-----|
+    | ...      | ... |
+    ```
     现在，开始你的工作！严格遵守上述所有黄金法则。
 
     Question: {input}
@@ -380,16 +571,16 @@ with st.sidebar:
 # 定义示例问题和回调函数
 EXAMPLE_PROMPTS = {
     "dataframe": [
-        "请用条形图展示每个产品类别的总销售额。要求：图表标题为‘各产品类别销售额对比’，Y轴为‘总销售额’，并将条形图颜色设为专业的天蓝色（SteelBlue）。",
-        "请用带有数据标记的折线图分析月度销售总额的趋势。要求：图表标题为‘月度销售总额趋势（2024年）’，X轴为‘月份’，Y轴为‘总销售额’，并将线条颜色设为经典的深蓝色。",
-        "请用饼图展示不同支付方式的使用占比。要求：图表标题为‘支付方式分布情况’，并使用explode效果突出显示占比最高的那一项。",
-        "分析不同地区的平均订单金额，并用水平条形图进行可视化。要求：图表标题为‘各地区平均订单金额对比’，X轴标签为‘平均金额（元）’，并将图表颜色设为清爽的绿色。",
+        "用条形图展示每个地区的总销售额",
+        "用折线图分析2024年每个月的总销售额趋势",
+        "创建一个新列叫“订单等级”，规则为：金额大于8000为“高价值”，2000-8000为“中价值”，其余为“低价值”，然后用条形图统计各等级订单数量",
+        "请分析顾客年龄与消费金额的关系",
     ],
     "database": [
-        "查询并返回总销售额最高的地区。请用Markdown的格式清晰地展示地区名称和其对应的总销售额。",
-        "列出销量最高的前5个产品是什么？请用一个带表头的Markdown表格来展示，包含‘产品名称’和‘总销量’两列。",
-        "查询 '华南' 地区的所有订单记录，并以Markdown表格的形式返回前5条记录，展示订单ID、产品名称和总金额。",
-        "统计每个支付方式被使用了多少次。请用一个按使用次数降序排列的Markdown表格显示结果，包含‘支付方式’和‘使用次数’两列。",
+        "订单ID为10010的总金额是多少？ ",
+        "哪个地区的平均订单金额最高？",
+        "购买了“智能手机 Pro”的客户，平均消费总额是多少？ ",
+        "哪个产品最受欢迎？ ",
     ]
 }
 
